@@ -1,17 +1,35 @@
-from typing import NamedTuple
+from typing import Dict, NamedTuple
 
 import folium
 import pandas as pd
 import snowflake.connector
 import streamlit as st
-
-# from folium.plugins import FastMarkerCluster
-from folium.plugins import MarkerCluster
 from streamlit_folium import folium_static, st_folium
 
 ## constants
 # How many decimals to round to
-ROUND_TO = 2
+ROUND_TO = 1
+COLORS = [
+    "red",
+    "blue",
+    "green",
+    "purple",
+    "orange",
+    "darkred",
+    "lightred",
+    "beige",
+    "darkblue",
+    "darkgreen",
+    "cadetblue",
+    "darkpurple",
+    "white",
+    "pink",
+    "lightblue",
+    "lightgreen",
+    "gray",
+    "black",
+    "lightgray",
+]
 
 
 ## classes
@@ -24,20 +42,35 @@ class Coordinates(NamedTuple):
     @classmethod
     def from_dict(cls, coordinates: dict) -> "Coordinates":
         shift = 10 ** (-ROUND_TO)
-        x1 = round(float(coordinates["_southWest"]["lng"]), ROUND_TO) - shift
-        y1 = round(float(coordinates["_southWest"]["lat"]), ROUND_TO) - shift
-        x2 = round(float(coordinates["_northEast"]["lng"]), ROUND_TO) + shift
-        y2 = round(float(coordinates["_northEast"]["lat"]), ROUND_TO) + shift
+        x1 = round(float(coordinates["_southWest"]["lng"]) - shift, ROUND_TO)
+        y1 = round(float(coordinates["_southWest"]["lat"]) - shift, ROUND_TO)
+        x2 = round(float(coordinates["_northEast"]["lng"]) + shift, ROUND_TO)
+        y2 = round(float(coordinates["_northEast"]["lat"]) + shift, ROUND_TO)
 
         return cls(x1, y1, x2, y2)
+
 
 ## functions
 @st.experimental_singleton
 def sfconn():
     return snowflake.connector.connect(**st.secrets["sfdevrel"])
 
+
 @st.experimental_memo(max_entries=128)
-def get_data(coordinates: Coordinates, num_rows: int = 1000) -> pd.DataFrame:
+def _get_data(query: str) -> pd.DataFrame:
+    df = pd.read_sql(
+        query,
+        conn,
+    )
+    return df
+
+
+def get_data(
+    coordinates: Coordinates,
+    table: str = "POINT",
+    column: str = "ACCESS",
+    num_rows: int = 1000,
+) -> pd.DataFrame:
     x1 = coordinates.x1
     y1 = coordinates.y1
     x2 = coordinates.x2
@@ -47,61 +80,98 @@ def get_data(coordinates: Coordinates, num_rows: int = 1000) -> pd.DataFrame:
 
     polygon = f"st_makepolygon(to_geography('{linestring}'))"
 
-    df = pd.read_sql(
-        f"""
-        select * from
-        ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_POINT
+    query = f"""
+        select
+            *
+            --OSM_ID,
+            --{column},
+            --NAME,
+            --WAY
+        from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_{table}
         where NAME is not null
+        and {column} is not null
         and st_within(WAY, {polygon})
         limit {num_rows}
-        """,
-        conn,
-    )
-    return df
+        """
+
+    st.expander("Show query").code(query)
+
+    return _get_data(query)
+
 
 @st.experimental_singleton
 def get_flds_in_table(tbl):
 
-    df = pd.read_sql(f"show columns in ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl.lower()}", conn)
+    df = pd.read_sql(
+        f"show columns in ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl.lower()}",
+        conn,
+    )
 
     ##TODO: pop columns out that shouldn't be chosen
     return df["column_name"]
 
 
 if "points" not in st.session_state:
-    st.session_state["points"] = []
+    st.session_state["points"] = pd.DataFrame()
 
 
 ## streamlit app code below
 conn = sfconn()
 
-tbl = st.sidebar.selectbox("1. Choose a geometry type", ["Point", "Line", "Polygon"], key = 'tbl')
+tbl = st.sidebar.selectbox(
+    "1. Choose a geometry type", ["Point", "Line", "Polygon"], key="tbl"
+)
 
 flds = get_flds_in_table(tbl)
-flds_selected = st.sidebar.selectbox("2. Choose a column", flds)
+col_selected = st.sidebar.selectbox("2. Choose a column", flds)
 
 
 tags = st.sidebar.multiselect("3. Choose tags to visualize", ["private", "permissive"])
 
-m = folium.Map(location=(39.8, -86.1), zoom_start=14)
-
-for point in st.session_state["points"]:
-    # marker_cluster = FastMarkerCluster("Points").add_to(m)
-    marker_cluster = MarkerCluster().add_to(m)
-    gj = folium.GeoJson(data=point.WAY)
-    gj.add_child(folium.Popup(point.NAME))
-    gj.add_to(marker_cluster)
+m = folium.Map(location=(39.8, -86.1), zoom_start=13)
 
 
-data = st_folium(m, width=1000)
+map_data = st_folium(m, width=1000)
 
-st.expander("Show map data").json(data)
+st.expander("Show map data").json(map_data)
 
-coordinates = Coordinates.from_dict(data["bounds"])
+coordinates = Coordinates.from_dict(map_data["bounds"])
 
-df = get_data(coordinates, 100)
+df = get_data(coordinates, column=col_selected, table=tbl, num_rows=100)
 
-df
+st.expander("Show data").write(df)
 
-for _, row in df.iterrows():
-    st.session_state["points"][:] = [row for _, row in df.iterrows()]
+# st.session_state["points"].clear()
+
+st.session_state["points"] = df
+
+# for _, row in df.iterrows():
+#    st.session_state["points"][row.OSM_ID] = row
+
+# st.session_state["points"][:] = [row for _, row in df.iterrows()]
+
+m = folium.Map(location=(39.8, -86.1), zoom_start=13)
+
+df = st.session_state["points"]
+
+unique_vals = df[col_selected].unique()
+
+color_map = {val: COLORS[idx % len(COLORS)] for idx, val in enumerate(unique_vals)}
+
+for _, point in st.session_state["points"].iterrows():
+    # color = COLORS[0]
+    # if point.ACCESS == "private":
+    #    color = COLORS[1]
+    # elif point.ACCESS == "permissive":
+    #    color = COLORS[2]
+
+    color = color_map[point[col_selected]]
+
+    # color = COLORS
+    gj = folium.GeoJson(
+        data=point.WAY, marker=folium.Marker(icon=folium.Icon(color=color))
+    )
+    gj.add_child(folium.Popup(f"{point.NAME}\n{col_selected}: {point[col_selected]}"))
+    gj.add_to(m)
+
+st_folium(m, width=1000, key="second_map")
