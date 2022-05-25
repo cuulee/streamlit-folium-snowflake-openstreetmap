@@ -59,6 +59,14 @@ def get_data(coordinates: Coordinates, num_rows: int = 1000) -> pd.DataFrame:
     )
     return df
 
+@st.experimental_singleton
+def get_flds_in_table(tbl):
+
+    df = pd.read_sql(f"show columns in ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl.lower()}", conn)
+
+    ##TODO: pop columns out that shouldn't be chosen
+    return df["column_name"]
+
 
 if "points" not in st.session_state:
     st.session_state["points"] = []
@@ -67,9 +75,13 @@ if "points" not in st.session_state:
 ## streamlit app code below
 conn = sfconn()
 
-tbl = st.sidebar.selectbox("Choose a geometry type", ["Point", "Line", "Polygon"], key = 'tbl')
-fld = st.sidebar.selectbox("Choose a column", ["Access"])
-tags = st.sidebar.multiselect("Choose tags to visualize", ["private", "permissive"])
+tbl = st.sidebar.selectbox("1. Choose a geometry type", ["Point", "Line", "Polygon"], key = 'tbl')
+
+flds = get_flds_in_table(tbl)
+flds_selected = st.sidebar.selectbox("2. Choose a column", flds)
+
+
+tags = st.sidebar.multiselect("3. Choose tags to visualize", ["private", "permissive"])
 
 m = folium.Map(location=(39.8, -86.1), zoom_start=14)
 
