@@ -66,6 +66,12 @@ if "points" not in st.session_state:
     st.session_state["points"] = []
 
 
+## streamlit app code below
+
+tbl = st.sidebar.selectbox("Choose a geometry type", ["Point", "Line", "Polygon"], key = 'tbl')
+fld = st.sidebar.selectbox("Choose a column", ["Access"])
+tags = st.sidebar.multiselect("Choose tags to visualize", ["private", "permissive"])
+
 m = folium.Map(location=(39.8, -86.1), zoom_start=14)
 
 for point in st.session_state["points"]:
