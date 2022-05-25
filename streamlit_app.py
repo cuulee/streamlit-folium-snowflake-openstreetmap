@@ -1,3 +1,5 @@
+import json
+from tkinter import W
 from typing import Dict, NamedTuple
 
 import folium
@@ -150,13 +152,59 @@ unique_vals = df[col_selected].unique()
 
 color_map = {val: COLORS[idx % len(COLORS)] for idx, val in enumerate(unique_vals)}
 
+features: list[dict] = []
+
 for _, point in st.session_state["points"].iterrows():
     color = color_map[point[col_selected]]
 
-    gj = folium.GeoJson(
-        data=point.WAY, marker=folium.Marker(icon=folium.Icon(color=color))
+    features.append(
+        {
+            "type": "Feature",
+            "geometry": json.loads(point.WAY),
+            "properties": {
+                "color": color,
+                "NAME": point["NAME"],
+                col_selected: point[col_selected],
+            },
+        }
     )
+
+feature_collection = {
+    "type": "FeatureCollection",
+    "features": features,
+    "properties": {"color": "purple"},
+}
+
+
+def get_color(feature: dict) -> dict:
+    return {
+        #'fillColor': '#ffaf00',
+        "color": feature["properties"]["color"],
+        # "fillColor": feature["properties"]["color"],
+        #'weight': 1.5,
+        #'dashArray': '5, 5'
+    }
+
+
+st.expander("Show features").json(feature_collection)
+
+gj = folium.GeoJson(data=feature_collection, style_function=get_color)
+
+folium.GeoJsonPopup(fields=["NAME", col_selected], labels=True).add_to(gj)
+
+gj.add_to(m)
+
+x = """
+    if tbl == "point":
+        gj = folium.GeoJson(
+            data=point.WAY, marker=folium.Marker(icon=folium.Icon(color=color))
+        )
+    else:
+        gj = folium.GeoJson(
+            data=point.WAY,
+        )
     gj.add_child(folium.Popup(f"{point.NAME}\n{col_selected}: {point[col_selected]}"))
     gj.add_to(m)
+"""
 
 st_folium(m, width=1000, key="second_map")
