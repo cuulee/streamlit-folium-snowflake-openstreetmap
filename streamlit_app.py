@@ -83,10 +83,6 @@ def get_data(
     query = f"""
         select
             *
-            --OSM_ID,
-            --{column},
-            --NAME,
-            --WAY
         from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_{table}
         where NAME is not null
         and {column} is not null
@@ -107,8 +103,7 @@ def get_flds_in_table(tbl):
         conn,
     )
 
-    ##TODO: pop columns out that shouldn't be chosen
-    return df["column_name"]
+    return df[~df["column_name"].isin(["OSM_ID", "WAY"])]["column_name"]
 
 
 if "points" not in st.session_state:
