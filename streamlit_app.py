@@ -128,6 +128,10 @@ col_selected = st.sidebar.selectbox("2. Choose a column", flds)
 
 tags = st.sidebar.multiselect("3. Choose tags to visualize", ["private", "permissive"])
 
+num_rows = st.sidebar.select_slider(
+    "How many rows?", [10, 100, 1000, 10_000], value=100
+)
+
 m = folium.Map(location=(39.8, -86.1), zoom_start=13)
 
 
@@ -137,18 +141,11 @@ st.expander("Show map data").json(map_data)
 
 coordinates = Coordinates.from_dict(map_data["bounds"])
 
-df = get_data(coordinates, column=col_selected, table=tbl, num_rows=100)
+df = get_data(coordinates, column=col_selected, table=tbl, num_rows=num_rows)
 
 st.expander("Show data").write(df)
 
-# st.session_state["points"].clear()
-
 st.session_state["points"] = df
-
-# for _, row in df.iterrows():
-#    st.session_state["points"][row.OSM_ID] = row
-
-# st.session_state["points"][:] = [row for _, row in df.iterrows()]
 
 m = folium.Map(location=(39.8, -86.1), zoom_start=13)
 
@@ -159,15 +156,8 @@ unique_vals = df[col_selected].unique()
 color_map = {val: COLORS[idx % len(COLORS)] for idx, val in enumerate(unique_vals)}
 
 for _, point in st.session_state["points"].iterrows():
-    # color = COLORS[0]
-    # if point.ACCESS == "private":
-    #    color = COLORS[1]
-    # elif point.ACCESS == "permissive":
-    #    color = COLORS[2]
-
     color = color_map[point[col_selected]]
 
-    # color = COLORS
     gj = folium.GeoJson(
         data=point.WAY, marker=folium.Marker(icon=folium.Icon(color=color))
     )
