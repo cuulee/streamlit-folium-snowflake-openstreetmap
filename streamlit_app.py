@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 import folium
 import pandas as pd
 import snowflake.connector
@@ -15,13 +17,33 @@ def sfconn():
 
 conn = sfconn()
 
+# How many decimals to round to
+ROUND_TO = 2
 
-@st.experimental_memo
-def get_data(coordinates: dict, num_rows: int = 1000) -> pd.DataFrame:
-    x1 = coordinates["_southWest"]["lng"]
-    y1 = coordinates["_southWest"]["lat"]
-    x2 = coordinates["_northEast"]["lng"]
-    y2 = coordinates["_northEast"]["lat"]
+
+class Coordinates(NamedTuple):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+    @classmethod
+    def from_dict(cls, coordinates: dict) -> "Coordinates":
+        shift = 10 ** (-ROUND_TO)
+        x1 = round(float(coordinates["_southWest"]["lng"]), ROUND_TO) - shift
+        y1 = round(float(coordinates["_southWest"]["lat"]), ROUND_TO) - shift
+        x2 = round(float(coordinates["_northEast"]["lng"]), ROUND_TO) + shift
+        y2 = round(float(coordinates["_northEast"]["lat"]), ROUND_TO) + shift
+
+        return cls(x1, y1, x2, y2)
+
+
+@st.experimental_memo(max_entries=128)
+def get_data(coordinates: Coordinates, num_rows: int = 1000) -> pd.DataFrame:
+    x1 = coordinates.x1
+    y1 = coordinates.y1
+    x2 = coordinates.x2
+    y2 = coordinates.y2
 
     linestring = f"LINESTRING({x1} {y1}, {x2} {y1}, {x2} {y2}, {x1} {y2}, {x1} {y1})"
 
@@ -58,7 +80,9 @@ data = st_folium(m, width=1000)
 
 st.expander("Show map data").json(data)
 
-df = get_data(data["bounds"], 100)
+coordinates = Coordinates.from_dict(data["bounds"])
+
+df = get_data(coordinates, 100)
 
 df
 
