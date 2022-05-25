@@ -9,18 +9,12 @@ import streamlit as st
 from folium.plugins import MarkerCluster
 from streamlit_folium import folium_static, st_folium
 
-
-@st.experimental_singleton
-def sfconn():
-    return snowflake.connector.connect(**st.secrets["sfdevrel"])
-
-
-conn = sfconn()
-
+## constants
 # How many decimals to round to
 ROUND_TO = 2
 
 
+## classes
 class Coordinates(NamedTuple):
     x1: float
     y1: float
@@ -37,6 +31,10 @@ class Coordinates(NamedTuple):
 
         return cls(x1, y1, x2, y2)
 
+## functions
+@st.experimental_singleton
+def sfconn():
+    return snowflake.connector.connect(**st.secrets["sfdevrel"])
 
 @st.experimental_memo(max_entries=128)
 def get_data(coordinates: Coordinates, num_rows: int = 1000) -> pd.DataFrame:
@@ -67,6 +65,7 @@ if "points" not in st.session_state:
 
 
 ## streamlit app code below
+conn = sfconn()
 
 tbl = st.sidebar.selectbox("Choose a geometry type", ["Point", "Line", "Polygon"], key = 'tbl')
 fld = st.sidebar.selectbox("Choose a column", ["Access"])
