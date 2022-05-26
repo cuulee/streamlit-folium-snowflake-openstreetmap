@@ -107,32 +107,52 @@ def get_flds_in_table(tbl):
     remove_fields = [
         "OSM_ID",
         "WAY",
+        "ADDR_HOUSENAME",
+        "ADDR_HOUSENUMBER",
+        "ADDR_INTERPOLATION",
+        "POPULATION",
+        "WIDTH",
+        "WOOD",
+        "Z_ORDER",
+        "TAGS",
+        "LAYER",
+        "REF",
     ]
     if tbl.lower() == "point":
-        remove_fields.append(
+        remove_fields.extend(
             [
-                "ADDR_HOUSENAME",
-                "ADDR_HOUSENUMBER",
-                "ADDR_INTERPOLATION",
                 "AREA",
                 "BRIDGE",
                 "CUTTING",
                 "ELE",
                 "EMBANKMENT",
                 "HARBOUR",
-                "LAYER",
                 "LOCK",
-                "POPULATION",
                 "POWER_SOURCE",
-                "REF",
                 "ROUTE",
                 "TOLL",
-                "WIDTH",
-                "WOOD",
-                "Z_ORDER",
-                "TAGS",
             ]
         )
+    elif tbl.lower() == "line":
+        remove_fields.extend(
+            [
+                "AREA",
+                "BRAND",
+                "BUILDING",
+                "DENOMINATION",
+                "HARBOUR",
+                "OFFICE",
+                "POWER_SOURCE",
+                "RELIGION",
+                "SHOP",
+                "TOWER_TYPE",
+            ]
+        )
+    elif tbl.lower() == "polygon":
+        remove_fields.extend(
+            ["CULVERT", "CUTTING", "LOCK", "POWER_SOURCE", "ROUTE", "WAY_AREA"]
+        )
+
     return df[~df["column_name"].isin(remove_fields)]["column_name"]
 
 
