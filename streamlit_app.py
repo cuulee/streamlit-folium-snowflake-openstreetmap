@@ -8,6 +8,7 @@ import snowflake.connector
 import streamlit as st
 from streamlit_folium import st_folium
 
+st.set_page_config("OpenStreetMap", layout="wide")
 ## constants
 # How many decimals to round to
 ROUND_TO = 1
