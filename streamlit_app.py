@@ -1,58 +1,14 @@
 import json
-from time import sleep
-from typing import NamedTuple
-
 import folium
 import pandas as pd
 import snowflake.connector
 import streamlit as st
-from soupsieve import select
+
 from streamlit_folium import st_folium
+from constants import COLORS
+from coordinates import Coordinates
 
 st.set_page_config("OpenStreetMap", layout="wide")
-## constants
-# How many decimals to round to
-ROUND_TO = 1
-COLORS = [
-    "red",
-    "blue",
-    "green",
-    "purple",
-    "orange",
-    "darkred",
-    "lightred",
-    "beige",
-    "darkblue",
-    "darkgreen",
-    "cadetblue",
-    "darkpurple",
-    "white",
-    "pink",
-    "lightblue",
-    "lightgreen",
-    "gray",
-    "black",
-    "lightgray",
-]
-
-
-## classes
-class Coordinates(NamedTuple):
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-
-    @classmethod
-    def from_dict(cls, coordinates: dict) -> "Coordinates":
-        shift = 10 ** (-ROUND_TO)
-        x1 = round(float(coordinates["_southWest"]["lng"]) - shift, ROUND_TO)
-        y1 = round(float(coordinates["_southWest"]["lat"]) - shift, ROUND_TO)
-        x2 = round(float(coordinates["_northEast"]["lng"]) + shift, ROUND_TO)
-        y2 = round(float(coordinates["_northEast"]["lat"]) + shift, ROUND_TO)
-
-        return cls(x1, y1, x2, y2)
-
 
 ## functions
 @st.experimental_singleton
@@ -93,9 +49,6 @@ def get_data(
         and st_within(WAY, {polygon})
         limit {num_rows}
         """
-
-    st.expander("Show query").code(query)
-
     return _get_data(query)
 
 
@@ -205,12 +158,12 @@ def get_data_from_map_data(
 
     df = get_data(coordinates, column=col_selected, table=tbl, num_rows=num_rows)
 
-    st.expander("Show data").write(df)
+    # st.expander("Show data").write(df)
 
     if not df.equals(pd.DataFrame(st.session_state["points"])):
         st.session_state["points"] = df
 
-    st.expander("Show session state").write(st.session_state)
+    # st.expander("Show session state").write(st.session_state)
     st.session_state["map_data"] = map_data
 
     if rerun:
@@ -275,7 +228,7 @@ def get_feature_collection(df: pd.DataFrame, tags: list, col_selected: str) -> d
         "properties": {"color": "purple"},
     }
 
-    st.expander("Show features").json(feature_collection)
+    # st.expander("Show features").json(feature_collection)
 
     return feature_collection
 
@@ -285,6 +238,8 @@ if "points" not in st.session_state:
 
 
 ## streamlit app code below
+"### OpenStreetMap - North America"
+
 conn = sfconn()
 
 zoom = st.session_state.get("map_data", {"zoom": 13})["zoom"]
@@ -318,7 +273,7 @@ tags = st.sidebar.multiselect(
 num_rows = st.sidebar.select_slider(
     "How many rows?",
     [10, 100, 1000, 10_000],
-    value=100,
+    value=1000,
     key="num_rows",
     on_change=selector_updated,
 )
@@ -339,13 +294,13 @@ if (
 ):
     st.session_state["map_data"] = map_data
 
-st.expander("Show map data").json(map_data)
+# st.expander("Show map data").json(map_data)
 
 if st.session_state["points"].empty:
     get_data_from_map_data(map_data, tbl, col_selected, num_rows)
 
 
-if st.button("Update data"):
+if st.sidebar.button("Update data"):
     get_data_from_map_data(map_data, tbl, col_selected, num_rows)
 
-st.expander("Show session state").write(st.session_state)
+# st.expander("Show session state").write(st.session_state)
