@@ -107,6 +107,23 @@ def get_flds_in_table(tbl):
 
     return df[~df["column_name"].isin(["OSM_ID", "WAY"])]["column_name"]
 
+@st.experimental_memo
+def get_fld_values(tbl, col):
+
+    df = pd.read_sql(
+        f"""
+        select
+        {col},
+        count(*) as inst
+        from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl}
+        where {col} is not NULL
+        group by 1
+        order by 2 desc;
+        """, conn
+    )
+
+    return df[col]
+
 
 if "points" not in st.session_state:
     st.session_state["points"] = pd.DataFrame()
@@ -122,8 +139,8 @@ tbl = st.sidebar.selectbox(
 flds = get_flds_in_table(tbl)
 col_selected = st.sidebar.selectbox("2. Choose a column", flds)
 
-
-tags = st.sidebar.multiselect("3. Choose tags to visualize", ["private", "permissive"])
+tgs = get_fld_values(tbl, col_selected)
+tags = st.sidebar.multiselect("3. Choose tags to visualize", tgs)
 
 num_rows = st.sidebar.select_slider(
     "How many rows?", [10, 100, 1000, 10_000], value=100
