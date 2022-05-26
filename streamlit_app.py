@@ -1,12 +1,12 @@
 import json
-from tkinter import W
-from typing import Dict, NamedTuple
+from time import sleep
+from typing import NamedTuple
 
 import folium
 import pandas as pd
 import snowflake.connector
 import streamlit as st
-from streamlit_folium import folium_static, st_folium
+from streamlit_folium import st_folium
 
 ## constants
 # How many decimals to round to
@@ -58,7 +58,7 @@ def sfconn():
     return snowflake.connector.connect(**st.secrets["sfdevrel"])
 
 
-@st.experimental_memo(max_entries=128)
+@st.experimental_memo(max_entries=128, show_spinner=False)
 def _get_data(query: str) -> pd.DataFrame:
     df = pd.read_sql(
         query,
@@ -107,7 +107,8 @@ def get_flds_in_table(tbl):
 
     return df[~df["column_name"].isin(["OSM_ID", "WAY"])]["column_name"]
 
-@st.experimental_memo
+
+@st.experimental_memo(show_spinner=False)
 def get_fld_values(tbl, col):
 
     df = pd.read_sql(
@@ -119,10 +120,27 @@ def get_fld_values(tbl, col):
         where {col} is not NULL
         group by 1
         order by 2 desc;
-        """, conn
+        """,
+        conn,
     )
 
     return df[col]
+
+
+def get_color(feature: dict) -> dict:
+    return {
+        #'fillColor': '#ffaf00',
+        "color": feature["properties"]["color"],
+        # "fillColor": feature["properties"]["color"],
+        #'weight': 1.5,
+        #'dashArray': '5, 5'
+    }
+
+
+def add_data_to_map(geojson_data: dict, map: folium.Map):
+    gj = folium.GeoJson(data=geojson_data, style_function=get_color)
+    folium.GeoJsonPopup(fields=["NAME", col_selected], labels=True).add_to(gj)
+    gj.add_to(m)
 
 
 if "points" not in st.session_state:
@@ -149,79 +167,73 @@ num_rows = st.sidebar.select_slider(
 m = folium.Map(location=(39.8, -86.1), zoom_start=13)
 
 
-map_data = st_folium(m, width=1000)
+def get_feature_collection(df: pd.DataFrame, tags: list) -> dict:
+    if df.empty:
+        return {}
+
+    unique_vals = df[col_selected].unique()
+
+    color_map = {val: COLORS[idx % len(COLORS)] for idx, val in enumerate(unique_vals)}
+
+    features: list[dict] = []
+
+    for _, point in df.iterrows():
+        if tags and point[col_selected] not in tags:
+            continue
+
+        color = color_map[point[col_selected]]
+
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": json.loads(point.WAY),
+                "properties": {
+                    "color": color,
+                    "NAME": point["NAME"],
+                    col_selected: point[col_selected],
+                },
+            }
+        )
+
+    feature_collection = {
+        "type": "FeatureCollection",
+        "features": features,
+        "properties": {"color": "purple"},
+    }
+
+    st.expander("Show features").json(feature_collection)
+
+    return feature_collection
+
+
+feature_collection = get_feature_collection(st.session_state["points"], tags)
+
+if feature_collection:
+    add_data_to_map(feature_collection, m)
+
+map_data = st_folium(m, width=1000, key="hard_coded_key")
+
+if "zoom" in map_data:
+    st.session_state["zoom"] = map_data["zoom"]
 
 st.expander("Show map data").json(map_data)
 
-coordinates = Coordinates.from_dict(map_data["bounds"])
 
-df = get_data(coordinates, column=col_selected, table=tbl, num_rows=num_rows)
+def get_data_from_map_data(map_data: dict):
+    coordinates = Coordinates.from_dict(map_data["bounds"])
 
-st.expander("Show data").write(df)
+    df = get_data(coordinates, column=col_selected, table=tbl, num_rows=num_rows)
 
-st.session_state["points"] = df
+    st.expander("Show data").write(df)
 
-m = folium.Map(location=(39.8, -86.1), zoom_start=13)
+    if not df.equals(pd.DataFrame(st.session_state["points"])):
+        st.session_state["points"] = df
 
-df = st.session_state["points"]
-
-unique_vals = df[col_selected].unique()
-
-color_map = {val: COLORS[idx % len(COLORS)] for idx, val in enumerate(unique_vals)}
-
-features: list[dict] = []
-
-for _, point in st.session_state["points"].iterrows():
-    color = color_map[point[col_selected]]
-
-    features.append(
-        {
-            "type": "Feature",
-            "geometry": json.loads(point.WAY),
-            "properties": {
-                "color": color,
-                "NAME": point["NAME"],
-                col_selected: point[col_selected],
-            },
-        }
-    )
-
-feature_collection = {
-    "type": "FeatureCollection",
-    "features": features,
-    "properties": {"color": "purple"},
-}
+    st.expander("Show session state").write(st.session_state)
 
 
-def get_color(feature: dict) -> dict:
-    return {
-        #'fillColor': '#ffaf00',
-        "color": feature["properties"]["color"],
-        # "fillColor": feature["properties"]["color"],
-        #'weight': 1.5,
-        #'dashArray': '5, 5'
-    }
-
-
-st.expander("Show features").json(feature_collection)
-
-gj = folium.GeoJson(data=feature_collection, style_function=get_color)
-
-folium.GeoJsonPopup(fields=["NAME", col_selected], labels=True).add_to(gj)
-
-gj.add_to(m)
-
-x = """
-    if tbl == "point":
-        gj = folium.GeoJson(
-            data=point.WAY, marker=folium.Marker(icon=folium.Icon(color=color))
-        )
-    else:
-        gj = folium.GeoJson(
-            data=point.WAY,
-        )
-    gj.add_child(folium.Popup(f"{point.NAME}\n{col_selected}: {point[col_selected]}"))
-    gj.add_to(m)
-"""
-
-st_folium(m, width=1000, key="second_map")
+if st.button("Update data"):
+    try:
+        get_data_from_map_data(map_data)
+    except TypeError as e:
+        pass
