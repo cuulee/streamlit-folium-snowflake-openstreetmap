@@ -6,6 +6,7 @@ import folium
 import pandas as pd
 import snowflake.connector
 import streamlit as st
+from soupsieve import select
 from streamlit_folium import st_folium
 
 st.set_page_config("OpenStreetMap", layout="wide")
@@ -54,7 +55,7 @@ class Coordinates(NamedTuple):
 
 
 ## functions
-@st.experimental_singleton(show_spinner=False)
+@st.experimental_singleton
 def sfconn():
     return snowflake.connector.connect(**st.secrets["sfdevrel"])
 
@@ -98,7 +99,7 @@ def get_data(
     return _get_data(query)
 
 
-@st.experimental_singleton(show_spinner=False)
+@st.experimental_singleton
 def get_flds_in_table(tbl):
 
     df = pd.read_sql(
@@ -194,33 +195,53 @@ def add_data_to_map(geojson_data: dict, map: folium.Map):
     gj.add_to(m)
 
 
-if "points" not in st.session_state:
-    st.session_state["points"] = pd.DataFrame()
+def get_data_from_map_data(
+    map_data: dict, tbl: str, col_selected: str, num_rows: int, rerun: bool = True
+):
+    try:
+        coordinates = Coordinates.from_dict(map_data["bounds"])
+    except TypeError:
+        return
+
+    df = get_data(coordinates, column=col_selected, table=tbl, num_rows=num_rows)
+
+    st.expander("Show data").write(df)
+
+    if not df.equals(pd.DataFrame(st.session_state["points"])):
+        st.session_state["points"] = df
+
+    st.expander("Show session state").write(st.session_state)
+    st.session_state["map_data"] = map_data
+
+    if rerun:
+        st.experimental_rerun()
 
 
-## streamlit app code below
-conn = sfconn()
+def selector_updated():
+    tbl = st.session_state["table"]
+    col_selected = st.session_state["col_selected"]
+    num_rows = st.session_state["num_rows"]
+    map_data = st.session_state["map_data"]
 
-tbl = st.sidebar.selectbox(
-    "1. Choose a geometry type", ["Point", "Line", "Polygon"], key="tbl"
-)
-
-flds = get_flds_in_table(tbl)
-col_selected = st.sidebar.selectbox("2. Choose a column", flds)
-
-tgs = get_fld_values(tbl, col_selected)
-tags = st.sidebar.multiselect(
-    "3. Choose tags to visualize", tgs, help="Tags listed by frequency high-to-low"
-)
-
-num_rows = st.sidebar.select_slider(
-    "How many rows?", [10, 100, 1000, 10_000], value=100
-)
-
-m = folium.Map(location=(39.8, -86.1), zoom_start=13)
+    get_data_from_map_data(map_data, tbl, col_selected, num_rows, rerun=False)
 
 
-def get_feature_collection(df: pd.DataFrame, tags: list) -> dict:
+def get_center(map_data: dict = None):
+    if map_data is None:
+        return (39.8, -86.1)
+
+    try:
+        y1 = float(map_data["bounds"]["_southWest"]["lat"])
+        y2 = float(map_data["bounds"]["_northEast"]["lat"])
+        x1 = float(map_data["bounds"]["_southWest"]["lng"])
+        x2 = float(map_data["bounds"]["_northEast"]["lng"])
+
+        return ((y2 + y1) / 2, (x2 + x1) / 2)
+    except (KeyError, TypeError):
+        return (39.8, -86.1)
+
+
+def get_feature_collection(df: pd.DataFrame, tags: list, col_selected: str) -> dict:
     if df.empty:
         return {}
 
@@ -259,34 +280,64 @@ def get_feature_collection(df: pd.DataFrame, tags: list) -> dict:
     return feature_collection
 
 
-feature_collection = get_feature_collection(st.session_state["points"], tags)
+if "points" not in st.session_state:
+    st.session_state["points"] = pd.DataFrame()
+
+
+## streamlit app code below
+conn = sfconn()
+
+zoom = st.session_state.get("map_data", {"zoom": 13})["zoom"]
+
+
+location = get_center(st.session_state.get("map_data"))
+
+m = folium.Map(location=location, zoom_start=zoom)
+
+
+tbl = st.sidebar.selectbox(
+    "1. Choose a geometry type",
+    ["Point", "Line", "Polygon"],
+    key="table",
+    on_change=selector_updated,
+)
+
+flds = get_flds_in_table(tbl)
+col_selected = st.sidebar.selectbox(
+    "2. Choose a column", flds, key="col_selected", on_change=selector_updated
+)
+
+tgs = get_fld_values(tbl, col_selected)
+tags = st.sidebar.multiselect(
+    "3. Choose tags to visualize",
+    tgs,
+    help="Tags listed by frequency high-to-low",
+    on_change=selector_updated,
+)
+
+num_rows = st.sidebar.select_slider(
+    "How many rows?",
+    [10, 100, 1000, 10_000],
+    value=100,
+    key="num_rows",
+    on_change=selector_updated,
+)
+
+
+feature_collection = get_feature_collection(
+    st.session_state["points"], tags, col_selected
+)
 
 if feature_collection:
     add_data_to_map(feature_collection, m)
 
 map_data = st_folium(m, width=1000, key="hard_coded_key")
 
-if "zoom" in map_data:
-    st.session_state["zoom"] = map_data["zoom"]
+if "map_data" not in st.session_state:
+    st.session_state["map_data"] = map_data
 
 st.expander("Show map data").json(map_data)
 
 
-def get_data_from_map_data(map_data: dict):
-    coordinates = Coordinates.from_dict(map_data["bounds"])
-
-    df = get_data(coordinates, column=col_selected, table=tbl, num_rows=num_rows)
-
-    st.expander("Show data").write(df)
-
-    if not df.equals(pd.DataFrame(st.session_state["points"])):
-        st.session_state["points"] = df
-
-    st.expander("Show session state").write(st.session_state)
-
-
 if st.button("Update data"):
-    try:
-        get_data_from_map_data(map_data)
-    except TypeError as e:
-        pass
+    get_data_from_map_data(map_data, tbl, col_selected, num_rows)
