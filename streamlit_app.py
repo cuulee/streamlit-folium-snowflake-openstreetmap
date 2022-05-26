@@ -104,8 +104,56 @@ def get_flds_in_table(tbl):
         f"show columns in ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl.lower()}",
         conn,
     )
+    remove_fields = [
+        "OSM_ID",
+        "WAY",
+        "ADDR_HOUSENAME",
+        "ADDR_HOUSENUMBER",
+        "ADDR_INTERPOLATION",
+        "POPULATION",
+        "WIDTH",
+        "WOOD",
+        "Z_ORDER",
+        "TAGS",
+        "LAYER",
+        "REF",
+    ]
+    if tbl.lower() == "point":
+        remove_fields.extend(
+            [
+                "AREA",
+                "BRIDGE",
+                "CUTTING",
+                "ELE",
+                "EMBANKMENT",
+                "HARBOUR",
+                "LOCK",
+                "POWER_SOURCE",
+                "ROUTE",
+                "TOLL",
+            ]
+        )
+    elif tbl.lower() == "line":
+        remove_fields.extend(
+            [
+                "AREA",
+                "BRAND",
+                "BUILDING",
+                "DENOMINATION",
+                "HARBOUR",
+                "OFFICE",
+                "POWER_SOURCE",
+                "RELIGION",
+                "SHOP",
+                "TOWER_TYPE",
+            ]
+        )
+    elif tbl.lower() == "polygon":
+        remove_fields.extend(
+            ["CULVERT", "CUTTING", "LOCK", "POWER_SOURCE", "ROUTE", "WAY_AREA"]
+        )
 
-    return df[~df["column_name"].isin(["OSM_ID", "WAY"])]["column_name"]
+    return df[~df["column_name"].isin(remove_fields)]["column_name"]
 
 
 @st.experimental_memo(show_spinner=False)
@@ -113,13 +161,15 @@ def get_fld_values(tbl, col):
 
     df = pd.read_sql(
         f"""
+        select * from (
         select
         {col},
         count(*) as inst
         from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl}
         where {col} is not NULL
         group by 1
-        order by 2 desc;
+        order by 2 desc)
+        where inst >= 10
         """,
         conn,
     )
@@ -158,7 +208,9 @@ flds = get_flds_in_table(tbl)
 col_selected = st.sidebar.selectbox("2. Choose a column", flds)
 
 tgs = get_fld_values(tbl, col_selected)
-tags = st.sidebar.multiselect("3. Choose tags to visualize", tgs)
+tags = st.sidebar.multiselect(
+    "3. Choose tags to visualize", tgs, help="Tags listed by frequency high-to-low"
+)
 
 num_rows = st.sidebar.select_slider(
     "How many rows?", [10, 100, 1000, 10_000], value=100
