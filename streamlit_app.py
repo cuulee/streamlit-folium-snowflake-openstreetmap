@@ -53,7 +53,7 @@ class Coordinates(NamedTuple):
 
 
 ## functions
-@st.experimental_singleton
+@st.experimental_singleton(show_spinner=False)
 def sfconn():
     return snowflake.connector.connect(**st.secrets["sfdevrel"])
 
@@ -97,7 +97,7 @@ def get_data(
     return _get_data(query)
 
 
-@st.experimental_singleton
+@st.experimental_singleton(show_spinner=False)
 def get_flds_in_table(tbl):
 
     df = pd.read_sql(
