@@ -10,23 +10,40 @@ from streamlit_folium import st_folium
 from constants import COLORS, COLUMN_VALS
 from coordinates import Coordinates
 
+## Set Streamlit app to wide, change title
 st.set_page_config("OpenStreetMap", layout="wide", page_icon=":world-map:")
 
-## functions
+#### functions ####
+## connect to Snowflake
 @st.experimental_singleton
 def sfconn():
     return snowflake.connector.connect(**st.secrets["sfdevrel"])
 
 
-@st.experimental_memo(max_entries=128, show_spinner=False)
-def _get_data(query: str) -> pd.DataFrame:
+## get all possible values for a given column chosen
+## limiting to more popular ones to avoid one-off and mistake values
+@st.experimental_memo(show_spinner=False)
+def get_fld_values(tbl, col):
+
     df = pd.read_sql(
-        query,
+        f"""
+        select * from (
+        select
+        {col},
+        count(*) as inst
+        from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl}
+        where {col} is not NULL
+        group by 1
+        order by 2 desc)
+        where inst >= 10
+        """,
         conn,
     )
-    return df
+
+    return df[col]
 
 
+## query Snowflake based on Streamlit input widgets
 def get_data(
     coordinates: Coordinates,
     table: str = "POINT",
@@ -78,32 +95,13 @@ def get_data(
 
     print(query)
     # st.expander("Show query").code(query)
-    data = _get_data(query)
+
+    data = pd.read_sql(query, conn)
     # st.expander("Show data").write(data)
     return data
 
 
-@st.experimental_memo(show_spinner=False)
-def get_fld_values(tbl, col):
-
-    df = pd.read_sql(
-        f"""
-        select * from (
-        select
-        {col},
-        count(*) as inst
-        from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl}
-        where {col} is not NULL
-        group by 1
-        order by 2 desc)
-        where inst >= 10
-        """,
-        conn,
-    )
-
-    return df[col]
-
-
+## from Snowflake query results, add data to Folium map
 def add_data_to_map(geojson_data: str, map: folium.Map, table: str, column: str):
     geojson = json.loads(geojson_data)
 
@@ -131,6 +129,7 @@ def add_data_to_map(geojson_data: str, map: folium.Map, table: str, column: str)
     gj.add_to(map)
 
 
+## take data returned from st_folium to refresh data from Snowflake
 def get_data_from_map_data(
     map_data: dict,
     tbl: str,
@@ -158,6 +157,7 @@ def get_data_from_map_data(
         st.experimental_rerun()
 
 
+## callback function to save the state of various elements
 def selector_updated():
     tbl = st.session_state["table"]
     col_selected = st.session_state["col_selected"]
@@ -170,21 +170,6 @@ def selector_updated():
     )
 
 
-def get_center(map_data: dict = None):
-    if map_data is None:
-        return (39.8, -86.1)
-
-    try:
-        y1 = float(map_data["bounds"]["_southWest"]["lat"])
-        y2 = float(map_data["bounds"]["_northEast"]["lat"])
-        x1 = float(map_data["bounds"]["_southWest"]["lng"])
-        x2 = float(map_data["bounds"]["_northEast"]["lng"])
-
-        return ((y2 + y1) / 2, (x2 + x1) / 2)
-    except (KeyError, TypeError):
-        return (39.8, -86.1)
-
-
 def get_feature_collection(df: pd.DataFrame) -> Optional[str]:
     if df.empty:
         return None
@@ -194,19 +179,18 @@ def get_feature_collection(df: pd.DataFrame) -> Optional[str]:
     return geojson_str
 
 
-if "points" not in st.session_state:
-    st.session_state["points"] = pd.DataFrame()
-
-
 ## streamlit app code below
 "### 🗺️ OpenStreetMap - North America"
 
 conn = sfconn()
 
+# initialize starting values
 zoom = st.session_state.get("map_data", {"zoom": 13})["zoom"]
+location = Coordinates.get_center(st.session_state.get("map_data"))
 
+if "points" not in st.session_state:
+    st.session_state["points"] = pd.DataFrame()
 
-location = get_center(st.session_state.get("map_data"))
 
 m = folium.Map(location=location, zoom_start=zoom)
 
