@@ -1,14 +1,15 @@
-import json
+from typing import Optional
+
 import folium
 import pandas as pd
 import snowflake.connector
 import streamlit as st
-
 from streamlit_folium import st_folium
-from constants import COLORS, COLUMN_VALS
+
+from constants import COLUMN_VALS
 from coordinates import Coordinates
 
-st.set_page_config("OpenStreetMap", layout="wide")
+st.set_page_config("OpenStreetMap", layout="wide", page_icon=":world-map:")
 
 ## functions
 @st.experimental_singleton
@@ -28,6 +29,7 @@ def _get_data(query: str) -> pd.DataFrame:
 def get_data(
     coordinates: Coordinates,
     table: str = "POINT",
+    tags: list = None,
     column: str = "ACCESS",
     num_rows: int = 1000,
 ) -> pd.DataFrame:
@@ -40,16 +42,30 @@ def get_data(
 
     polygon = f"st_makepolygon(to_geography('{linestring}'))"
 
+    if tags is not None:
+        tag_string = ",".join(f"'{tag}'" for tag in tags)
+
     query = f"""
+        with points as (
+            select
+                WAY
+            from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_{table}
+            where NAME is not null
+            and {column} is not null
+            and st_within(WAY, {polygon})
+            {f"and {column} in ({tag_string})" if tags else ""}
+            limit {num_rows}
+        )
         select
-            *
-        from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_{table}
-        where NAME is not null
-        and {column} is not null
-        and st_within(WAY, {polygon})
-        limit {num_rows}
+            st_collect(WAY) as geojson
+        from points
         """
-    return _get_data(query)
+
+    print(query)
+    # st.expander("Show query").code(query)
+    data = _get_data(query)
+    # st.expander("Show data").write(data)
+    return data
 
 
 @st.experimental_memo(show_spinner=False)
@@ -83,23 +99,27 @@ def get_color(feature: dict) -> dict:
     }
 
 
-def add_data_to_map(geojson_data: dict, map: folium.Map):
-    gj = folium.GeoJson(data=geojson_data, style_function=get_color)
-    folium.GeoJsonPopup(fields=["NAME", col_selected], labels=True).add_to(gj)
-    gj.add_to(m)
+def add_data_to_map(geojson_data: str, map: folium.Map):
+    gj = folium.GeoJson(data=geojson_data)
+    gj.add_to(map)
 
 
 def get_data_from_map_data(
-    map_data: dict, tbl: str, col_selected: str, num_rows: int, rerun: bool = True
+    map_data: dict,
+    tbl: str,
+    col_selected: str,
+    num_rows: int,
+    tags: list = None,
+    rerun: bool = True,
 ):
     try:
         coordinates = Coordinates.from_dict(map_data["bounds"])
     except TypeError:
         return
 
-    df = get_data(coordinates, column=col_selected, table=tbl, num_rows=num_rows)
-
-    # st.expander("Show data").write(df)
+    df = get_data(
+        coordinates, column=col_selected, table=tbl, num_rows=num_rows, tags=tags
+    )
 
     if not df.equals(pd.DataFrame(st.session_state["points"])):
         st.session_state["points"] = df
@@ -114,10 +134,13 @@ def get_data_from_map_data(
 def selector_updated():
     tbl = st.session_state["table"]
     col_selected = st.session_state["col_selected"]
+    tags = st.session_state["tags"]
     num_rows = st.session_state["num_rows"]
     map_data = st.session_state["map_data"]
 
-    get_data_from_map_data(map_data, tbl, col_selected, num_rows, rerun=False)
+    get_data_from_map_data(
+        map_data, tbl, col_selected, num_rows=num_rows, tags=tags, rerun=False
+    )
 
 
 def get_center(map_data: dict = None):
@@ -135,43 +158,13 @@ def get_center(map_data: dict = None):
         return (39.8, -86.1)
 
 
-def get_feature_collection(df: pd.DataFrame, tags: list, col_selected: str) -> dict:
+def get_feature_collection(df: pd.DataFrame) -> Optional[str]:
     if df.empty:
-        return {}
+        return None
 
-    unique_vals = df[col_selected].unique()
+    geojson_str = df["GEOJSON"].iloc[0]
 
-    color_map = {val: COLORS[idx % len(COLORS)] for idx, val in enumerate(unique_vals)}
-
-    features: list[dict] = []
-
-    for _, point in df.iterrows():
-        if tags and point[col_selected] not in tags:
-            continue
-
-        color = color_map[point[col_selected]]
-
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": json.loads(point.WAY),
-                "properties": {
-                    "color": color,
-                    "NAME": point["NAME"],
-                    col_selected: point[col_selected],
-                },
-            }
-        )
-
-    feature_collection = {
-        "type": "FeatureCollection",
-        "features": features,
-        "properties": {"color": "purple"},
-    }
-
-    # st.expander("Show features").json(feature_collection)
-
-    return feature_collection
+    return geojson_str
 
 
 if "points" not in st.session_state:
@@ -179,7 +172,7 @@ if "points" not in st.session_state:
 
 
 ## streamlit app code below
-"### OpenStreetMap - North America"
+"### 🗺️ OpenStreetMap - North America"
 
 conn = sfconn()
 
@@ -209,6 +202,7 @@ tgs = get_fld_values(tbl, col_selected)
 tags = st.sidebar.multiselect(
     "3. Choose tags to visualize",
     tgs,
+    key="tags",
     help="Tags listed by frequency high-to-low",
     on_change=selector_updated,
 )
@@ -222,9 +216,7 @@ num_rows = st.sidebar.select_slider(
 )
 
 
-feature_collection = get_feature_collection(
-    st.session_state["points"], tags, col_selected
-)
+feature_collection = get_feature_collection(st.session_state["points"])
 
 if feature_collection:
     add_data_to_map(feature_collection, m)
@@ -239,11 +231,7 @@ if (
 
 # st.expander("Show map data").json(map_data)
 
-if st.session_state["points"].empty:
-    get_data_from_map_data(map_data, tbl, col_selected, num_rows)
-
-
-if st.sidebar.button("Update data"):
-    get_data_from_map_data(map_data, tbl, col_selected, num_rows)
+if st.sidebar.button("Update data") or st.session_state["points"].empty:
+    get_data_from_map_data(map_data, tbl, col_selected, tags=tags, num_rows=num_rows)
 
 # st.expander("Show session state").write(st.session_state)
