@@ -93,11 +93,7 @@ def get_feature_collection(
         from points;
         """
 
-    print(query)
-    # st.expander("Show query").code(query)
-
     data = pd.read_sql(query, conn)
-    # st.expander("Show data").write(data)
 
     features = json.loads(data["GEOJSON"].iloc[0])
     return features
@@ -152,7 +148,6 @@ def get_data_from_map_data(
     if "features" not in st.session_state or st.session_state["features"] != features:
         st.session_state["features"] = features
 
-    # st.expander("Show session state").write(st.session_state)
     st.session_state["map_data"] = map_data
 
     if rerun:
@@ -203,8 +198,8 @@ tags = st.sidebar.multiselect(
 )
 
 num_rows = st.sidebar.select_slider(
-    "How many rows?",
-    [10, 100, 1000, 10_000],
+    "Maximum number of rows?",
+    [100, 1000, 10_000, 100_000],
     value=1000,
     key="num_rows",
     on_change=selector_updated,
@@ -229,10 +224,6 @@ if (
 ):
     st.session_state["map_data"] = map_data
 
-# st.expander("Show map data").json(map_data)
-
 ## way to update map without causing full refresh on each mouse movement
 if st.sidebar.button("Update data") or "features" not in st.session_state:
     get_data_from_map_data(map_data, tbl, col_selected, tags=tags, num_rows=num_rows)
-
-# st.expander("Show session state").write(st.session_state)
