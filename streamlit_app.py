@@ -172,18 +172,13 @@ def selector_updated():
     )
 
 
-## streamlit app code below
+#### streamlit app code below ####
 "### 🗺️ OpenStreetMap - North America"
 
+## connect to snowflake
 conn = sfconn()
 
-# initialize starting values
-zoom = st.session_state.get("map_data", {"zoom": 13})["zoom"]
-location = Coordinates.get_center(st.session_state.get("map_data"))
-
-m = folium.Map(location=location, zoom_start=zoom)
-
-
+## put sidebar widgets up as high as possible in code to avoid flickering
 tbl = st.sidebar.selectbox(
     "1. Choose a geometry type",
     ["Point", "Line", "Polygon"],
@@ -215,11 +210,19 @@ num_rows = st.sidebar.select_slider(
     on_change=selector_updated,
 )
 
+## initialize starting values, create map
+zoom = st.session_state.get("map_data", {"zoom": 13})["zoom"]
+location = Coordinates.get_center(st.session_state.get("map_data"))
+m = folium.Map(location=location, zoom_start=zoom)
+
+## if data is available, plot it
 if "features" in st.session_state:
     add_data_to_map(st.session_state["features"], m, table=tbl, column=col_selected)
 
+## display map on app
 map_data = st_folium(m, width=1000, key="hard_coded_key")
 
+## if data missing or non-existing in session state, make a new entry
 if (
     "map_data" not in st.session_state
     or st.session_state["map_data"]["bounds"]["_southWest"]["lat"] is None
@@ -228,6 +231,7 @@ if (
 
 # st.expander("Show map data").json(map_data)
 
+## way to update map without causing full refresh on each mouse movement
 if st.sidebar.button("Update data") or "features" not in st.session_state:
     get_data_from_map_data(map_data, tbl, col_selected, tags=tags, num_rows=num_rows)
 
