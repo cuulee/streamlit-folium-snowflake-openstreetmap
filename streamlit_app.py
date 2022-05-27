@@ -1,3 +1,4 @@
+import json
 from typing import Optional
 
 import folium
@@ -6,7 +7,7 @@ import snowflake.connector
 import streamlit as st
 from streamlit_folium import st_folium
 
-from constants import COLUMN_VALS
+from constants import COLORS, COLUMN_VALS
 from coordinates import Coordinates
 
 st.set_page_config("OpenStreetMap", layout="wide", page_icon=":world-map:")
@@ -43,12 +44,25 @@ def get_data(
     polygon = f"st_makepolygon(to_geography('{linestring}'))"
 
     if tags is not None:
+        tags = [tag.replace("'", "''") for tag in tags]
         tag_string = ",".join(f"'{tag}'" for tag in tags)
 
+    # In order to store and keep properties around, manually construct json, rather than
+    # using st_collect
     query = f"""
         with points as (
             select
-                WAY
+                NAME,
+                {column},
+                object_construct(
+                    'type', 'Feature',
+                    'geometry', ST_ASGEOJSON(WAY),
+                    'properties',
+                        object_construct(
+                            'NAME', NAME,
+                            '{column}', {column}
+                        )
+                ) as geojson_obj
             from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_{table}
             where NAME is not null
             and {column} is not null
@@ -56,9 +70,10 @@ def get_data(
             {f"and {column} in ({tag_string})" if tags else ""}
             limit {num_rows}
         )
+
         select
-            st_collect(WAY) as geojson
-        from points
+            object_construct('type', 'FeatureCollection', 'features', array_agg(geojson_obj)) as geojson
+        from points;
         """
 
     print(query)
@@ -89,18 +104,30 @@ def get_fld_values(tbl, col):
     return df[col]
 
 
-def get_color(feature: dict) -> dict:
-    return {
-        #'fillColor': '#ffaf00',
-        "color": feature["properties"]["color"],
-        # "fillColor": feature["properties"]["color"],
-        #'weight': 1.5,
-        #'dashArray': '5, 5'
-    }
+def add_data_to_map(geojson_data: str, map: folium.Map, table: str, column: str):
+    geojson = json.loads(geojson_data)
 
+    unique_vals = set(
+        [feature["properties"][col_selected] for feature in geojson["features"]]
+    )
 
-def add_data_to_map(geojson_data: str, map: folium.Map):
-    gj = folium.GeoJson(data=geojson_data)
+    color_map = {val: COLORS[idx % len(COLORS)] for idx, val in enumerate(unique_vals)}
+
+    for feature in geojson["features"]:
+        feature["properties"]["color"] = color_map[feature["properties"][column]]
+
+    def get_color(feature: dict) -> dict:
+        styles = {
+            "color": feature["properties"]["color"],
+            "fillColor": feature["properties"]["color"],
+        }
+        if table == "Point":
+            styles["weight"] = 10
+
+        return styles
+
+    gj = folium.GeoJson(data=geojson, style_function=get_color, marker=folium.Circle())
+    folium.GeoJsonPopup(fields=["NAME", column], labels=True).add_to(gj)
     gj.add_to(map)
 
 
@@ -219,7 +246,7 @@ num_rows = st.sidebar.select_slider(
 feature_collection = get_feature_collection(st.session_state["points"])
 
 if feature_collection:
-    add_data_to_map(feature_collection, m)
+    add_data_to_map(feature_collection, m, table=tbl, column=col_selected)
 
 map_data = st_folium(m, width=1000, key="hard_coded_key")
 
