@@ -1,5 +1,4 @@
 from typing import NamedTuple
-from constants import ROUND_TO
 
 
 class Coordinates(NamedTuple):
@@ -10,11 +9,10 @@ class Coordinates(NamedTuple):
 
     @classmethod
     def from_dict(cls, coordinates: dict) -> "Coordinates":
-        shift = 10 ** (-ROUND_TO)
-        x1 = round(float(coordinates["_southWest"]["lng"]) - shift, ROUND_TO)
-        y1 = round(float(coordinates["_southWest"]["lat"]) - shift, ROUND_TO)
-        x2 = round(float(coordinates["_northEast"]["lng"]) + shift, ROUND_TO)
-        y2 = round(float(coordinates["_northEast"]["lat"]) + shift, ROUND_TO)
+        x1 = float(coordinates["_southWest"]["lng"])
+        y1 = float(coordinates["_southWest"]["lat"])
+        x2 = float(coordinates["_northEast"]["lng"])
+        y2 = float(coordinates["_northEast"]["lat"])
 
         return cls(x1, y1, x2, y2)
 

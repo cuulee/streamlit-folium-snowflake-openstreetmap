@@ -1,6 +1,3 @@
-# How many decimals to round to
-ROUND_TO = 1
-
 COLORS = [
     "red",
     "blue",
