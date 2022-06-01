@@ -20,6 +20,23 @@ def sfconn():
     return snowflake.connector.connect(**st.secrets["sfdevrel"])
 
 
+## Get the list of points with CAPITAL = 4 (state capitals)
+@st.experimental_singleton
+def state_capitals() -> pd.DataFrame:
+    df = pd.read_sql(
+        """
+        select
+            name,
+            way as location
+        from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_POINT
+        where CAPITAL = '4'
+        order by name
+        """,
+        conn,
+    )
+    return df
+
+
 ## get all possible values for a given column chosen
 ## limiting to more popular ones to avoid one-off and mistake values
 @st.experimental_memo(show_spinner=False)
@@ -120,11 +137,44 @@ def add_data_to_map(geojson_data: dict, map: folium.Map, table: str, column: str
 
         return styles
 
+    if len(geojson_data["features"]) == 0:
+        return
+
     gj = folium.GeoJson(
         data=geojson_data, style_function=get_color, marker=folium.Circle()
     )
     folium.GeoJsonPopup(fields=["NAME", column], labels=True).add_to(gj)
     gj.add_to(map)
+
+
+def clear_state():
+    del st.session_state[autostate]
+
+
+def get_order(key) -> int:
+    # Don't ever sort by keys with None as their value
+    if st.session_state[key] is None:
+        return -1
+
+    return len(str(key))
+
+
+def get_capital_data(capital: str) -> Optional[dict]:
+    if capital == "--NONE--":
+        return None
+
+    df = state_capitals()
+    location = json.loads(df[df["NAME"] == capital]["LOCATION"].iloc[0])["coordinates"]
+    center = {
+        "lat": location[1],
+        "lng": location[0],
+    }
+    zoom = 11
+
+    return {
+        "center": center,
+        "zoom": zoom,
+    }
 
 
 #### streamlit app code below ####
@@ -154,38 +204,43 @@ tags = st.sidebar.multiselect(
 )
 
 num_rows = st.sidebar.select_slider(
-    "Maximum number of rows?",
+    "Maximum number of rows",
     [100, 1000, 10_000, 100_000],
     value=1000,
     key="num_rows",
 )
 
+capitals = ["--NONE--"] + list(state_capitals()["NAME"].values)
 
-def get_order(key) -> int:
-    if st.session_state[key] is not None:
-        return len(str(key))
-    # Don't ever sort by keys with None as their value
-    return -1
-
+capital = st.sidebar.selectbox(
+    "Zoom map to capital?", options=capitals, key="capital", on_change=clear_state
+)
 
 ## figure out key of automatically written state
 ## this is slightly hacky
 autostate = cast(str, sorted(st.session_state.keys(), key=get_order)[-1])
+
+capital_data = get_capital_data(capital)
 
 ## initialize starting value of zoom if it doesn't exist
 ## otherwise, get it from session_state
 try:
     zoom = st.session_state[autostate]["zoom"]
 except (TypeError, KeyError):
-    zoom = 4
+    if capital_data is None:
+        zoom = 4
+    else:
+        zoom = capital_data["zoom"]
 
 ## initialize starting value of center if it doesn't exist
 ## otherwise, get it from session_state
 try:
     center = st.session_state[autostate]["center"]
 except (TypeError, KeyError):
-    center = {"lat": 37.97, "lng": -96.12}
-
+    if capital_data is None:
+        center = {"lat": 37.97, "lng": -96.12}
+    else:
+        center = capital_data["center"]
 
 "### 🗺️ OpenStreetMap - North America"
 
@@ -198,8 +253,8 @@ try:
 except TypeError:
     coordinates = Coordinates.from_dict(
         {
-            "_southWest": {"lat": 10.290060240659766, "lng": -140.07046669721603},
-            "_northEast": {"lat": 58.15737472780594, "lng": -52.17984169721604},
+            "_southWest": {"lat": 10.31491928581316, "lng": -140.09765625000003},
+            "_northEast": {"lat": 58.17070248348609, "lng": -52.20703125000001},
         }
     )
 
@@ -209,7 +264,6 @@ st.session_state["features"] = get_feature_collection(
 )
 
 add_data_to_map(st.session_state["features"], m, table=tbl, column=col_selected)
-
 
 ## display map on app
 map_data = st_folium(m, width=1000)
