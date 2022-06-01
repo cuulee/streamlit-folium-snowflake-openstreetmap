@@ -203,17 +203,22 @@ tags = st.sidebar.multiselect(
     help="Tags listed by frequency high-to-low",
 )
 
+capitals = ["--NONE--"] + list(state_capitals()["NAME"].values)
+
+capital = st.sidebar.selectbox(
+    "(Optional) Zoom map to capital?",
+    options=capitals,
+    key="capital",
+    on_change=clear_state,
+)
+
+## visual divider between less important input
+st.sidebar.write("---")
 num_rows = st.sidebar.select_slider(
     "Maximum number of rows",
     [100, 1000, 10_000, 100_000],
     value=1000,
     key="num_rows",
-)
-
-capitals = ["--NONE--"] + list(state_capitals()["NAME"].values)
-
-capital = st.sidebar.selectbox(
-    "Zoom map to capital?", options=capitals, key="capital", on_change=clear_state
 )
 
 ## figure out key of automatically written state
@@ -244,6 +249,7 @@ except (TypeError, KeyError):
 
 "### 🗺️ OpenStreetMap - North America"
 
+"---"
 ## Initialize Folium
 m = folium.Map(location=(center["lat"], center["lng"]), zoom_start=zoom)
 
