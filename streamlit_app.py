@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import Optional, cast
 
 import folium
 import pandas as pd
@@ -28,13 +28,13 @@ def get_fld_values(tbl, col):
     df = pd.read_sql(
         f"""
         select * from (
-        select
-        {col},
-        count(*) as inst
-        from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl}
-        where {col} is not NULL
-        group by 1
-        order by 2 desc)
+            select
+            {col},
+            count(*) as inst
+            from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.planet_osm_{tbl}
+            where {col} is not NULL
+            group by 1
+            order by 2 desc)
         where inst >= 10
         """,
         conn,
@@ -127,48 +127,7 @@ def add_data_to_map(geojson_data: dict, map: folium.Map, table: str, column: str
     gj.add_to(map)
 
 
-## take data returned from st_folium to refresh data from Snowflake
-def get_data_from_map_data(
-    map_data: dict,
-    tbl: str,
-    col_selected: str,
-    num_rows: int,
-    tags: list = None,
-    rerun: bool = True,
-):
-    try:
-        coordinates = Coordinates.from_dict(map_data["bounds"])
-    except TypeError:
-        return
-
-    features = get_feature_collection(
-        coordinates, column=col_selected, table=tbl, num_rows=num_rows, tags=tags
-    )
-
-    if "features" not in st.session_state or st.session_state["features"] != features:
-        st.session_state["features"] = features
-
-    st.session_state["map_data"] = map_data
-
-    if rerun:
-        st.experimental_rerun()
-
-
-## callback function to save the state of various elements
-def selector_updated():
-    tbl = st.session_state["table"]
-    col_selected = st.session_state["col_selected"]
-    tags = st.session_state["tags"]
-    num_rows = st.session_state["num_rows"]
-    map_data = st.session_state["map_data"]
-
-    get_data_from_map_data(
-        map_data, tbl, col_selected, num_rows=num_rows, tags=tags, rerun=False
-    )
-
-
 #### streamlit app code below ####
-"### 🗺️ OpenStreetMap - North America"
 
 ## connect to snowflake
 conn = sfconn()
@@ -178,14 +137,12 @@ tbl = st.sidebar.selectbox(
     "1. Choose a geometry type",
     ["Point", "Line", "Polygon"],
     key="table",
-    on_change=selector_updated,
 )
 
 col_selected = st.sidebar.selectbox(
     "2. Choose a column",
     COLUMN_VALS[tbl.lower()],
     key="col_selected",
-    on_change=selector_updated,
 )
 
 tgs = get_fld_values(tbl, col_selected)
@@ -194,7 +151,6 @@ tags = st.sidebar.multiselect(
     tgs,
     key="tags",
     help="Tags listed by frequency high-to-low",
-    on_change=selector_updated,
 )
 
 num_rows = st.sidebar.select_slider(
@@ -202,35 +158,58 @@ num_rows = st.sidebar.select_slider(
     [100, 1000, 10_000, 100_000],
     value=1000,
     key="num_rows",
-    on_change=selector_updated,
 )
 
-## initialize starting values, create map
-zoom = st.session_state.get("map_data", {"zoom": 13})["zoom"]
 
+def get_order(key) -> int:
+    if st.session_state[key] is not None:
+        return len(str(key))
+    # Don't ever sort by keys with None as their value
+    return -1
+
+
+## figure out key of automatically written state
+## this is slightly hacky
+autostate = cast(str, sorted(st.session_state.keys(), key=get_order)[-1])
+
+## initialize starting value of zoom if it doesn't exist
+## otherwise, get it from session_state
 try:
-    center = st.session_state["map_data"]["center"]
-except KeyError:
-    center = {"lat": 39.8, "lng": -86.1}
+    zoom = st.session_state[autostate]["zoom"]
+except (TypeError, KeyError):
+    zoom = 4
 
-location = center["lat"], center["lng"]
+## initialize starting value of center if it doesn't exist
+## otherwise, get it from session_state
+try:
+    center = st.session_state[autostate]["center"]
+except (TypeError, KeyError):
+    center = {"lat": 37.97, "lng": -96.12}
 
-m = folium.Map(location=location, zoom_start=zoom)
 
-## if data is available, plot it
-if "features" in st.session_state:
-    add_data_to_map(st.session_state["features"], m, table=tbl, column=col_selected)
+"### 🗺️ OpenStreetMap - North America"
+
+## Initialize Folium
+m = folium.Map(location=(center["lat"], center["lng"]), zoom_start=zoom)
+
+## defines initial case, prior to map being rendered
+try:
+    coordinates = Coordinates.from_dict(st.session_state[autostate]["bounds"])
+except TypeError:
+    coordinates = Coordinates.from_dict(
+        {
+            "_southWest": {"lat": 10.290060240659766, "lng": -140.07046669721603},
+            "_northEast": {"lat": 58.15737472780594, "lng": -52.17984169721604},
+        }
+    )
+
+## get data from Snowflake
+st.session_state["features"] = get_feature_collection(
+    coordinates, column=col_selected, table=tbl, num_rows=num_rows, tags=tags
+)
+
+add_data_to_map(st.session_state["features"], m, table=tbl, column=col_selected)
+
 
 ## display map on app
-map_data = st_folium(m, width=1000, key="hard_coded_key")
-
-## if data missing or non-existing in session state, make a new entry
-if (
-    "map_data" not in st.session_state
-    or st.session_state["map_data"]["bounds"]["_southWest"]["lat"] is None
-):
-    st.session_state["map_data"] = map_data
-
-## way to update map without causing full refresh on each mouse movement
-if st.sidebar.button("Update data") or "features" not in st.session_state:
-    get_data_from_map_data(map_data, tbl, col_selected, tags=tags, num_rows=num_rows)
+map_data = st_folium(m, width=1000)
