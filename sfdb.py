@@ -10,7 +10,7 @@ import snowflake.connector
 from coordinates import Coordinates
 
 ## connect to Snowflake
-@st.experimental_singleton
+@st.experimental_singleton(show_spinner=False)
 def sfconn(**secrets):
     return snowflake.connector.connect(**secrets)
 
@@ -72,7 +72,7 @@ def get_feature_collection(
 
 
 ## Get the list of points with CAPITAL = 4 (state capitals)
-@st.experimental_singleton
+@st.experimental_singleton(show_spinner=False)
 def state_capitals(_conn) -> pd.DataFrame:
     df = pd.read_sql(
         """
