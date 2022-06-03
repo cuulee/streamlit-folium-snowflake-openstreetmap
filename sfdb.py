@@ -73,11 +73,7 @@ def get_feature_collection(
         from points;
     """
 
-    start = time()
-
     data = pd.read_sql(query, _conn)
-
-    end = time()
 
     st.sidebar.expander("Show generated query").code(dedent(query), language="sql")
 
@@ -91,7 +87,6 @@ def get_feature_collection(
 
     Rows returned: {n_rows}
 
-    Response time: {end - start:.2}s
     """
     )
 
