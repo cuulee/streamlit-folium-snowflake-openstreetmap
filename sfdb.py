@@ -1,13 +1,16 @@
 ## base python libraries
 import json
+from textwrap import dedent
+from time import time
 
 ## pip installed libraries
 import pandas as pd
-import streamlit as st
 import snowflake.connector
+import streamlit as st
 
 ## repo-local code
 from coordinates import Coordinates
+
 
 ## connect to Snowflake
 @st.experimental_singleton(show_spinner=False)
@@ -39,21 +42,25 @@ def get_feature_collection(
 
     # In order to store and keep properties around, manually construct json, rather than
     # using st_collect
+    table = f"ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_{table}".upper()
     query = f"""
         with points as (
             select
                 NAME,
                 {column},
+                TAGS,
                 object_construct(
                     'type', 'Feature',
                     'geometry', ST_ASGEOJSON(WAY),
                     'properties',
                         object_construct(
                             'NAME', NAME,
-                            '{column}', {column}
+                            '{column}', {column},
+                            'TAGS', SUBSTRING(TAGS, 0, 512),
+                            'OSM_ID', OSM_ID
                         )
                 ) as geojson_obj
-            from ZWITCH_DEV_WORKSPACE.TESTSCHEMA.PLANET_OSM_{table}
+            from {table}
             where NAME is not null
             and {column} is not null
             and st_within(WAY, {polygon})
@@ -64,11 +71,31 @@ def get_feature_collection(
         select
             object_construct('type', 'FeatureCollection', 'features', array_agg(geojson_obj)) as geojson
         from points;
-        """
+    """
+
+    start = time()
 
     data = pd.read_sql(query, _conn)
 
-    return json.loads(data["GEOJSON"].iloc[0])
+    end = time()
+
+    st.sidebar.expander("Show generated query").code(dedent(query), language="sql")
+
+    geojson_data = json.loads(data["GEOJSON"].iloc[0])
+
+    n_rows = len(geojson_data["features"])
+
+    st.sidebar.write(
+        f"""
+    Table: `{table}`
+
+    Rows returned: {n_rows}
+
+    Response time: {end - start:.2}s
+    """
+    )
+
+    return geojson_data
 
 
 ## Get the list of points with CAPITAL = 4 (state capitals)
